@@ -22,18 +22,16 @@ import com.samsamotot.otboo.common.fixture.LocationFixture;
 import com.samsamotot.otboo.common.fixture.UserFixture;
 import com.samsamotot.otboo.common.fixture.WeatherFixture;
 import com.samsamotot.otboo.common.type.SortDirection;
+import com.samsamotot.otboo.feed.dto.DeletedFeedCursorRequest;
 import com.samsamotot.otboo.feed.dto.FeedCreateRequest;
 import com.samsamotot.otboo.feed.dto.FeedCursorRequest;
 import com.samsamotot.otboo.feed.dto.FeedDto;
 import com.samsamotot.otboo.feed.dto.FeedUpdateRequest;
-import com.samsamotot.otboo.feed.dto.event.FeedDeleteEvent;
-import com.samsamotot.otboo.feed.dto.event.FeedSyncEvent;
 import com.samsamotot.otboo.feed.entity.Feed;
 import com.samsamotot.otboo.feed.entity.FeedClothes;
 import com.samsamotot.otboo.feed.mapper.FeedMapper;
 import com.samsamotot.otboo.feed.repository.FeedLikeRepository;
 import com.samsamotot.otboo.feed.repository.FeedRepository;
-import com.samsamotot.otboo.feed.repository.FeedSearchRepository;
 import com.samsamotot.otboo.location.entity.Location;
 import com.samsamotot.otboo.notification.dto.event.FeedCreatedEvent;
 import com.samsamotot.otboo.user.entity.User;
@@ -47,6 +45,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -82,13 +81,7 @@ public class FeedServiceTest {
     private ApplicationEventPublisher eventPublisher;
 
     @Mock
-    private FeedSearchRepository feedSearchRepository;
-
-    @Mock
     private FeedMapper feedMapper;
-
-    @Mock
-    private FeedDataSyncService feedDataSyncService;
 
     @InjectMocks
     private FeedServiceImpl feedService;
@@ -153,7 +146,6 @@ public class FeedServiceTest {
             assertThat(result).isNotNull();
             assertThat(result.id()).isEqualTo(expectedDto.id());
             assertThat(result.content()).isEqualTo(expectedDto.content());
-            verify(eventPublisher).publishEvent(any(FeedSyncEvent.class));
             verify(eventPublisher).publishEvent(any(FeedCreatedEvent.class));
         }
 
@@ -259,17 +251,18 @@ public class FeedServiceTest {
             // given
             FeedCursorRequest request = createDefaultRequest();
 
-            given(feedSearchRepository.findByCursor(any(), any(), anyInt(), anyString(), any(SortDirection.class), any(), any(), any(), any()))
-                .willReturn(new CursorResponse<>(List.of(), null, null, false, 0L, request.sortBy(), request.sortDirection()));
+            given(feedRepository.findByCursor(any(), any(), anyInt(), anyString(), any(SortDirection.class), any(), any(), any(), any()))
+                .willReturn(List.of());
+            given(feedRepository.countByFilter(any(), any(), any(), any())).willReturn(0L);
 
             // when
             feedService.getFeeds(request, defaultUserId);
 
             // then
-            verify(feedSearchRepository).findByCursor(
+            verify(feedRepository).findByCursor(
                 isNull(String.class),
                 isNull(UUID.class),
-                eq(request.limit()),
+                eq(request.limit() + 1),
                 eq(request.sortBy()),
                 eq(request.sortDirection()),
                 isNull(String.class),
@@ -293,18 +286,20 @@ public class FeedServiceTest {
                 .sortDirection(sortDirection)
                 .build();
 
-            List<FeedDto> contents = new ArrayList<>();
+            List<Feed> contents = new ArrayList<>();
             for (int i = 0; i < limit + 1; i++) {
                 Feed feed = FeedFixture.createFeed(mockUser, mockWeather);
                 ReflectionTestUtils.setField(feed, "id", UUID.randomUUID());
                 ReflectionTestUtils.setField(feed, "createdAt", Instant.now().plusSeconds(i));
-                FeedDto feedDto = FeedFixture.createFeedDto(feed);
-                contents.add(feedDto);
+                contents.add(feed);
             }
 
-            given(feedSearchRepository.findByCursor(
+            given(feedRepository.findByCursor(
                 any(), any(), anyInt(), anyString(), any(SortDirection.class), any(), any(), any(), any()
-            )).willReturn(new CursorResponse<>(contents.subList(0, limit), contents.get(limit).createdAt().toString(), contents.get(limit).id(), true, 3L, request.sortBy(), request.sortDirection()));
+            )).willReturn(contents);
+            given(feedLikeRepository.findFeedLikeIdsByUserIdAndFeedIdIn(any(), any())).willReturn(Set.of());
+            given(feedMapper.toDto(any(Feed.class))).willAnswer(inv -> FeedFixture.createFeedDto(inv.getArgument(0)));
+            given(feedRepository.countByFilter(any(), any(), any(), any())).willReturn(3L);
 
             // when
             CursorResponse<FeedDto> result = feedService.getFeeds(request, defaultUserId);
@@ -313,10 +308,10 @@ public class FeedServiceTest {
             assertThat(result.data()).hasSize(limit);
             assertThat(result.hasNext()).isTrue();
             assertThat(result.nextCursor()).isNotNull();
-            verify(feedSearchRepository).findByCursor(
+            verify(feedRepository).findByCursor(
                 isNull(String.class),
                 isNull(UUID.class),
-                eq(request.limit()),
+                eq(request.limit() + 1),
                 eq(request.sortBy()),
                 eq(request.sortDirection()),
                 isNull(String.class),
@@ -340,11 +335,13 @@ public class FeedServiceTest {
                 .sortDirection(sortDirection)
                 .build();
             Feed a = FeedFixture.createFeed(mockUser, mockWeather);
-            List<FeedDto> contents = List.of(FeedFixture.createFeedDto(a));
+            List<Feed> contents = List.of(a);
 
-            given(feedSearchRepository.findByCursor(
+            given(feedRepository.findByCursor(
                 any(), any(), anyInt(), anyString(), any(SortDirection.class), any(), any(), any(), any()
-            )).willReturn(new CursorResponse<>(contents, null, null, false, 1L, request.sortBy(), request.sortDirection()));
+            )).willReturn(contents);
+            given(feedMapper.toDto(any(Feed.class))).willAnswer(inv -> FeedFixture.createFeedDto(inv.getArgument(0)));
+            given(feedRepository.countByFilter(any(), any(), any(), any())).willReturn(1L);
 
             // when
             CursorResponse<FeedDto> result = feedService.getFeeds(request, defaultUserId);
@@ -352,10 +349,10 @@ public class FeedServiceTest {
             // then
             assertThat(result.hasNext()).isFalse();
             assertThat(result.nextCursor()).isNull();
-            verify(feedSearchRepository).findByCursor(
+            verify(feedRepository).findByCursor(
                 isNull(String.class),
                 isNull(UUID.class),
-                eq(request.limit()),
+                eq(request.limit() + 1),
                 eq(request.sortBy()),
                 eq(request.sortDirection()),
                 isNull(String.class),
@@ -370,32 +367,35 @@ public class FeedServiceTest {
 
             // given
             FeedCursorRequest request = createDefaultRequest();
-            List<FeedDto> contents = new ArrayList<>();
+            List<Feed> contents = new ArrayList<>();
             for (int i = 0; i < request.limit() + 1; i++) {
                 Feed feed = FeedFixture.createFeed(mockUser, mockWeather);
                 ReflectionTestUtils.setField(feed, "id", UUID.randomUUID());
                 ReflectionTestUtils.setField(feed, "createdAt", Instant.now().plusSeconds(i));
-                FeedDto feedDto = FeedFixture.createFeedDto(feed);
-                contents.add(feedDto);
+                contents.add(feed);
             }
-            FeedDto lastFeedDto = contents.get(request.limit() - 1);
+            Feed lastFeed = contents.get(request.limit() - 1);
 
-            given(feedSearchRepository.findByCursor(
+            given(feedRepository.findByCursor(
                 any(), any(), anyInt(), anyString(), any(SortDirection.class), any(), any(), any(), any()
-            )).willReturn(new CursorResponse<>(contents.subList(0, request.limit()), lastFeedDto.createdAt().toString(), lastFeedDto.id(), true, 11L, request.sortBy(), request.sortDirection()));
+            )).willReturn(contents);
+            given(feedLikeRepository.findFeedLikeIdsByUserIdAndFeedIdIn(any(), any())).willReturn(
+                Set.of());
+            given(feedMapper.toDto(any(Feed.class))).willAnswer(inv -> FeedFixture.createFeedDto(inv.getArgument(0)));
+            given(feedRepository.countByFilter(any(), any(), any(), any())).willReturn(11L);
 
             // when
             CursorResponse<FeedDto> result = feedService.getFeeds(request, defaultUserId);
 
             // then
             assertThat(result.hasNext()).isTrue();
-            assertThat(result.nextCursor()).isEqualTo(lastFeedDto.createdAt().toString());
-            assertThat(result.nextIdAfter()).isEqualTo(lastFeedDto.id());
+            assertThat(result.nextCursor()).isEqualTo(lastFeed.getCreatedAt().toString());
+            assertThat(result.nextIdAfter()).isEqualTo(lastFeed.getId());
 
-            verify(feedSearchRepository).findByCursor(
+            verify(feedRepository).findByCursor(
                 isNull(String.class),
                 isNull(UUID.class),
-                eq(request.limit()),
+                eq(request.limit() + 1),
                 eq(request.sortBy()),
                 eq(request.sortDirection()),
                 isNull(String.class),
@@ -418,7 +418,7 @@ public class FeedServiceTest {
             Feed f1 = FeedFixture.createFeedWithKeyword(mockUser, mockWeather, keyword);
             ReflectionTestUtils.setField(f1, "id", UUID.randomUUID());
             ReflectionTestUtils.setField(f1, "createdAt", Instant.now());
-            List<FeedDto> contents = List.of(FeedFixture.createFeedDto(f1));
+            List<Feed> contents = List.of(f1);
 
             FeedCursorRequest request = FeedCursorRequest.builder()
                 .limit(limit)
@@ -427,9 +427,12 @@ public class FeedServiceTest {
                 .keywordLike(keyword)
                 .build();
 
-            given(feedSearchRepository.findByCursor(
+            given(feedRepository.findByCursor(
                 any(), any(), anyInt(), anyString(), any(SortDirection.class), any(), any(), any(), any()
-            )).willReturn(new CursorResponse<>(contents, null, null, false, expectedTotalCount, request.sortBy(), request.sortDirection()));
+            )).willReturn(contents);
+            given(feedLikeRepository.findFeedLikeIdsByUserIdAndFeedIdIn(any(), any())).willReturn(Set.of());
+            given(feedMapper.toDto(any(Feed.class))).willAnswer(inv -> FeedFixture.createFeedDto(inv.getArgument(0)));
+            given(feedRepository.countByFilter(any(), any(), any(), any())).willReturn(expectedTotalCount);
 
             // when
             CursorResponse<FeedDto> result = feedService.getFeeds(request, defaultUserId);
@@ -437,12 +440,7 @@ public class FeedServiceTest {
             // then
             assertThat(result.totalCount()).isEqualTo(expectedTotalCount);
 
-            verify(feedSearchRepository).findByCursor(
-                eq(request.cursor()),
-                eq(request.idAfter()),
-                eq(request.limit()),
-                eq(request.sortBy()),
-                eq(request.sortDirection()),
+            verify(feedRepository).countByFilter(
                 eq(request.keywordLike()),
                 eq(request.skyStatusEqual()),
                 eq(request.precipitationTypeEqual()),
@@ -472,7 +470,7 @@ public class FeedServiceTest {
                 .extracting(e -> ((OtbooException) e).getErrorCode())
                 .isEqualTo(ErrorCode.INVALID_CURSOR_FORMAT);
 
-            verifyNoInteractions(feedSearchRepository);
+            verifyNoInteractions(feedRepository);
         }
 
         @Test
@@ -481,9 +479,10 @@ public class FeedServiceTest {
             // given
             FeedCursorRequest request = createDefaultRequest();
 
-            given(feedSearchRepository.findByCursor(
+            given(feedRepository.findByCursor(
                 any(), any(), anyInt(), anyString(), any(SortDirection.class), any(), any(), any(), any()
-            )).willReturn(new CursorResponse<>(List.of(), null, null, false, 0L, request.sortBy(), request.sortDirection()));
+            )).willReturn(List.of());
+            given(feedRepository.countByFilter(any(), any(), any(), any())).willReturn(0L);
 
             // when
             CursorResponse<FeedDto> result = feedService.getFeeds(request, defaultUserId);
@@ -518,18 +517,19 @@ public class FeedServiceTest {
                 .authorIdEqual(authorId)
                 .build();
 
-            given(feedSearchRepository.findByCursor(any(), any(), anyInt(), anyString(),
-                any(SortDirection.class), any(), any(), any(), any()))
-                .willReturn(new CursorResponse<>(List.of(), null, null, false, 0L, sortBy, sortDirection));
+            given(feedRepository.findByCursor(
+                any(), any(), anyInt(), anyString(), any(SortDirection.class), any(), any(), any(), any()
+            )).willReturn(List.of());
+            given(feedRepository.countByFilter(any(), any(), any(), any())).willReturn(0L);
 
             // when
             feedService.getFeeds(request, defaultUserId);
 
             // then
-            verify(feedSearchRepository).findByCursor(
+            verify(feedRepository).findByCursor(
                 isNull(String.class),
                 isNull(UUID.class),
-                eq(request.limit()),
+                eq(request.limit() + 1),
                 eq(request.sortBy()),
                 eq(request.sortDirection()),
                 eq(request.keywordLike()),
@@ -537,6 +537,38 @@ public class FeedServiceTest {
                 eq(request.precipitationTypeEqual()),
                 eq(request.authorIdEqual())
             );
+        }
+
+        @Test
+        void 조회결과는_DTO로_매핑된다() {
+
+            // given
+            Feed f1 = FeedFixture.createFeed(mockUser, mockWeather);
+            ReflectionTestUtils.setField(f1, "id", UUID.randomUUID());
+            ReflectionTestUtils.setField(f1, "createdAt", Instant.now());
+
+            Feed f2 = FeedFixture.createFeed(mockUser, mockWeather);
+            ReflectionTestUtils.setField(f2, "id", UUID.randomUUID());
+            ReflectionTestUtils.setField(f2, "createdAt", Instant.now().plusSeconds(1));
+            List<Feed> contents = List.of(f1, f2);
+            FeedCursorRequest request = createDefaultRequest();
+
+            given(feedRepository.findByCursor(
+                any(), any(), anyInt(), anyString(), any(SortDirection.class), any(), any(), any(), any()
+            )).willReturn(contents);
+            given(feedLikeRepository.findFeedLikeIdsByUserIdAndFeedIdIn(any(), any())).willReturn(Set.of());
+            given(feedMapper.toDto(any(Feed.class))).willAnswer(inv -> FeedFixture.createFeedDto(inv.getArgument(0)));
+            given(feedRepository.countByFilter(any(), any(), any(), any())).willReturn(2L);
+
+            // when
+            CursorResponse<FeedDto> result = feedService.getFeeds(request, defaultUserId);
+
+            // then
+            assertThat(result.data()).hasSize(2);
+            FeedDto d1 = result.data().get(0);
+            FeedDto d2 = result.data().get(1);
+            assertThat(d1.id()).isEqualTo(f1.getId());
+            assertThat(d2.id()).isEqualTo(f2.getId());
         }
 
         // 헬퍼 메서드
@@ -591,7 +623,6 @@ public class FeedServiceTest {
             assertThat(result.id()).isEqualTo(feedId);
             assertThat(result.content()).isEqualTo(updateContent);
             assertThat(result.author().userId()).isEqualTo(authorId);
-            verify(eventPublisher).publishEvent(any(FeedSyncEvent.class));
         }
 
         @Test
@@ -662,7 +693,6 @@ public class FeedServiceTest {
             // then
             assertThat(result).isNotNull();
             assertThat(result.isDeleted()).isTrue();
-            verify(eventPublisher).publishEvent(any(FeedDeleteEvent.class));
         }
 
         @Test
@@ -719,6 +749,312 @@ public class FeedServiceTest {
                 .isInstanceOf(OtbooException.class)
                 .extracting(e -> ((OtbooException) e).getErrorCode())
                 .isEqualTo(ErrorCode.FORBIDDEN_FEED_DELETION);
+        }
+    }
+
+    @Nested
+    @DisplayName("피드 물리 삭제 테스트")
+    class FeedHardDeleteTest {
+
+        @Test
+        void 피드를_물리_삭제_하면_레포지토리_delete가_호출된다() {
+
+            // given
+            UUID feedId = UUID.randomUUID();
+            Feed feed = FeedFixture.createFeed(mockUser, mockWeather);
+            ReflectionTestUtils.setField(feed, "id", feedId);
+
+            given(feedRepository.findById(any(UUID.class))).willReturn(Optional.of(feed));
+
+            // when
+            feedService.deleteHard(feedId);
+
+            // then
+            verify(feedRepository).delete(feed);
+        }
+
+        @Test
+        void 존재하지_않는_피드_삭제_요청시_예외가_발생한다() {
+
+            // given
+            UUID invalidFeedId = UUID.randomUUID();
+
+            given(feedRepository.findById(any(UUID.class))).willReturn(Optional.empty());
+
+            // when & then
+            assertThatThrownBy(() -> feedService.deleteHard(invalidFeedId))
+                .isInstanceOf(OtbooException.class)
+                .extracting(e -> ((OtbooException) e).getErrorCode())
+                .isEqualTo(ErrorCode.FEED_NOT_FOUND);
+        }
+    }
+
+    @Nested
+    @DisplayName("피드 복구 테스트")
+    class FeedRestoreTest {
+
+        @Test
+        void 복구_요청시_삭제된_피드가_복구된다() {
+
+            // given
+            UUID feedId = UUID.randomUUID();
+            Feed feed = FeedFixture.createFeed(mockUser, mockWeather);
+            ReflectionTestUtils.setField(feed, "id", feedId);
+            ReflectionTestUtils.setField(feed, "isDeleted", true);
+            UUID userId = mockUser.getId();
+
+            FeedDto expectedDto = FeedFixture.createFeedDto(feed);
+
+            given(feedRepository.findByIdAndIsDeletedTrue(any(UUID.class))).willReturn(Optional.of(feed));
+            given(feedMapper.toDto(any(Feed.class))).willReturn(expectedDto);
+
+            // when
+            FeedDto result = feedService.restore(feedId, userId);
+
+            // then
+            assertThat(result).isNotNull();
+            assertThat(feed.isDeleted()).isFalse();
+        }
+
+        @Test
+        void 삭제되지_않은_피드_복구_요청시_예외가_발생한다() {
+
+            // given
+            UUID feedId = UUID.randomUUID();
+            Feed feed = FeedFixture.createFeed(mockUser, mockWeather);
+            ReflectionTestUtils.setField(feed, "id", feedId);
+            UUID userId = mockUser.getId();
+
+            given(feedRepository.findByIdAndIsDeletedTrue(any(UUID.class))).willReturn(
+                Optional.empty());
+
+            // when & then
+            assertThatThrownBy(() -> feedService.restore(feedId, userId))
+                .isInstanceOf(OtbooException.class)
+                .extracting(e -> ((OtbooException) e).getErrorCode())
+                .isEqualTo(ErrorCode.FEED_NOT_FOUND);
+        }
+
+        @Test
+        void 작성자가_아닌_유저가_피드_복구_요청시_예외가_발생한다() {
+
+            // given
+            UUID feedId = UUID.randomUUID();
+            Feed feed = FeedFixture.createFeed(mockUser, mockWeather);
+            ReflectionTestUtils.setField(feed, "id", feedId);
+            feed.delete();
+            UUID otherUserId = UUID.randomUUID();
+
+            given(feedRepository.findByIdAndIsDeletedTrue(any(UUID.class))).willReturn(Optional.of(feed));
+
+            // when & then
+            assertThatThrownBy(() -> feedService.restore(feedId, otherUserId))
+                .isInstanceOf(OtbooException.class)
+                .extracting(e -> ((OtbooException) e).getErrorCode())
+                .isEqualTo(ErrorCode.FORBIDDEN_FEED_MODIFICATION);
+        }
+    }
+
+    @Nested
+    @DisplayName("삭제된 피드 목록 조회 테스트")
+    class DeletedFeedListGetTest {
+
+        UUID defaultUserId = UUID.randomUUID();
+
+        @Test
+        void 커서없이_조회시_주어진_정렬조건으로_레포지토리를_호출한다() {
+            // given
+            DeletedFeedCursorRequest request = createDefaultDeletedFeedRequest(10);
+            String sortBy = "createdAt";
+            SortDirection sortDirection = SortDirection.DESCENDING;
+
+            given(feedRepository.findDeletedByCursor(
+                any(), any(), anyInt(), anyString(), any(SortDirection.class), any(UUID.class)
+            )).willReturn(List.of());
+            given(feedRepository.countDeletedByAuthorId(any(UUID.class))).willReturn(0L);
+
+            // when
+            feedService.getDeletedFeeds(request, defaultUserId);
+
+            // then
+            verify(feedRepository).findDeletedByCursor(
+                isNull(String.class),
+                isNull(UUID.class),
+                eq(request.limit() + 1),
+                eq(sortBy),
+                eq(sortDirection),
+                eq(defaultUserId)
+            );
+        }
+
+        @Test
+        void hasNext_true면_nextCursor를_생성한다() {
+            // given
+            int limit = 2;
+            DeletedFeedCursorRequest request = createDefaultDeletedFeedRequest(limit);
+
+            List<Feed> contents = new ArrayList<>();
+            for (int i = 0; i < limit + 1; i++) {
+                Feed feed = FeedFixture.createFeed(mockUser, mockWeather);
+                ReflectionTestUtils.setField(feed, "id", UUID.randomUUID());
+                ReflectionTestUtils.setField(feed, "createdAt", Instant.now().plusSeconds(i));
+                contents.add(feed);
+            }
+
+            given(feedRepository.findDeletedByCursor(
+                any(), any(), anyInt(), anyString(), any(SortDirection.class), any(UUID.class)
+            )).willReturn(contents);
+            given(feedLikeRepository.findFeedLikeIdsByUserIdAndFeedIdIn(any(), any())).willReturn(Set.of());
+            given(feedMapper.toDto(any(Feed.class))).willAnswer(inv -> FeedFixture.createFeedDto(inv.getArgument(0)));
+            given(feedRepository.countDeletedByAuthorId(any(UUID.class))).willReturn(3L);
+
+            // when
+            CursorResponse<FeedDto> result = feedService.getDeletedFeeds(request, defaultUserId);
+
+            // then
+            assertThat(result.data()).hasSize(limit);
+            assertThat(result.hasNext()).isTrue();
+            assertThat(result.nextCursor()).isNotNull();
+        }
+
+        @Test
+        void hasNext_false면_nextCursor는_null이다() {
+            // given
+            int limit = 2;
+
+            DeletedFeedCursorRequest request = createDefaultDeletedFeedRequest(limit);
+            Feed a = FeedFixture.createFeed(mockUser, mockWeather);
+            List<Feed> contents = List.of(a);
+
+            given(feedRepository.findDeletedByCursor(
+                any(), any(), anyInt(), anyString(), any(SortDirection.class), any(UUID.class)
+            )).willReturn(contents);
+            given(feedMapper.toDto(any(Feed.class))).willAnswer(inv -> FeedFixture.createFeedDto(inv.getArgument(0)));
+            given(feedRepository.countDeletedByAuthorId(any(UUID.class))).willReturn(1L);
+
+            // when
+            CursorResponse<FeedDto> result = feedService.getDeletedFeeds(request, defaultUserId);
+
+            // then
+            assertThat(result.hasNext()).isFalse();
+            assertThat(result.nextCursor()).isNull();
+        }
+
+        @Test
+        void 생성된_커서정보는_마지막_조회결과의_정보를_올바르게_포함한다() {
+            // given
+            DeletedFeedCursorRequest request = createDefaultDeletedFeedRequest(10);
+            List<Feed> contents = new ArrayList<>();
+            for (int i = 0; i < request.limit() + 1; i++) {
+                Feed feed = FeedFixture.createFeed(mockUser, mockWeather);
+                ReflectionTestUtils.setField(feed, "id", UUID.randomUUID());
+                ReflectionTestUtils.setField(feed, "createdAt", Instant.now().plusSeconds(i));
+                contents.add(feed);
+            }
+            Feed lastFeed = contents.get(request.limit() - 1);
+
+            given(feedRepository.findDeletedByCursor(
+                any(), any(), anyInt(), anyString(), any(SortDirection.class), any(UUID.class)
+            )).willReturn(contents);
+            given(feedLikeRepository.findFeedLikeIdsByUserIdAndFeedIdIn(any(), any())).willReturn(Set.of());
+            given(feedMapper.toDto(any(Feed.class))).willAnswer(inv -> FeedFixture.createFeedDto(inv.getArgument(0)));
+            given(feedRepository.countDeletedByAuthorId(any(UUID.class))).willReturn(11L);
+
+            // when
+            CursorResponse<FeedDto> result = feedService.getDeletedFeeds(request, defaultUserId);
+
+            // then
+            assertThat(result.hasNext()).isTrue();
+            assertThat(result.nextCursor()).isEqualTo(lastFeed.getCreatedAt().toString());
+            assertThat(result.nextIdAfter()).isEqualTo(lastFeed.getId());
+        }
+
+        @Test
+        void 조회시_필터링된_총_개수를_함께_반환한다() {
+            // given
+            int limit = 10;
+            long expectedTotalCount = 1L;
+
+            DeletedFeedCursorRequest request = createDefaultDeletedFeedRequest(limit);
+
+            Feed f1 = FeedFixture.createFeed(mockUser, mockWeather);
+            ReflectionTestUtils.setField(f1, "id", UUID.randomUUID());
+            ReflectionTestUtils.setField(f1, "createdAt", Instant.now());
+            List<Feed> contents = List.of(f1);
+
+            given(feedRepository.findDeletedByCursor(
+                any(), any(), anyInt(), anyString(), any(SortDirection.class), any(UUID.class)
+            )).willReturn(contents);
+            given(feedLikeRepository.findFeedLikeIdsByUserIdAndFeedIdIn(any(), any())).willReturn(Set.of());
+            given(feedMapper.toDto(any(Feed.class))).willAnswer(inv -> FeedFixture.createFeedDto(inv.getArgument(0)));
+            given(feedRepository.countDeletedByAuthorId(any(UUID.class))).willReturn(expectedTotalCount);
+
+            // when
+            CursorResponse<FeedDto> result = feedService.getDeletedFeeds(request, defaultUserId);
+
+            // then
+            assertThat(result.totalCount()).isEqualTo(expectedTotalCount);
+
+            verify(feedRepository).countDeletedByAuthorId(eq(defaultUserId));
+        }
+
+        @Test
+        void 조회할_피드가_전혀_없을_때_빈_리스트와_null_커서를_반환한다() {
+            // given
+            DeletedFeedCursorRequest request = createDefaultDeletedFeedRequest(10);
+
+            given(feedRepository.findDeletedByCursor(
+                any(), any(), anyInt(), anyString(), any(SortDirection.class), any(UUID.class)
+            )).willReturn(List.of());
+            given(feedRepository.countDeletedByAuthorId(any(UUID.class))).willReturn(0L);
+
+            // when
+            CursorResponse<FeedDto> result = feedService.getDeletedFeeds(request, defaultUserId);
+
+            // then
+            assertThat(result.data()).isEmpty();
+            assertThat(result.hasNext()).isFalse();
+            assertThat(result.nextCursor()).isNull();
+        }
+
+        @Test
+        void 조회결과는_DTO로_매핑된다() {
+            // given
+            Feed f1 = FeedFixture.createFeed(mockUser, mockWeather);
+            ReflectionTestUtils.setField(f1, "id", UUID.randomUUID());
+            ReflectionTestUtils.setField(f1, "createdAt", Instant.now());
+
+            Feed f2 = FeedFixture.createFeed(mockUser, mockWeather);
+            ReflectionTestUtils.setField(f2, "id", UUID.randomUUID());
+            ReflectionTestUtils.setField(f2, "createdAt", Instant.now().plusSeconds(1));
+            List<Feed> contents = List.of(f1, f2);
+            DeletedFeedCursorRequest request = createDefaultDeletedFeedRequest(10);
+
+            given(feedRepository.findDeletedByCursor(
+                any(), any(), anyInt(), anyString(), any(SortDirection.class), any(UUID.class)
+            )).willReturn(contents);
+            given(feedLikeRepository.findFeedLikeIdsByUserIdAndFeedIdIn(any(), any())).willReturn(Set.of());
+            given(feedMapper.toDto(any(Feed.class))).willAnswer(inv -> FeedFixture.createFeedDto(inv.getArgument(0)));
+            given(feedRepository.countDeletedByAuthorId(any(UUID.class))).willReturn(2L);
+
+            // when
+            CursorResponse<FeedDto> result = feedService.getDeletedFeeds(request, defaultUserId);
+
+            // then
+            assertThat(result.data()).hasSize(2);
+            FeedDto d1 = result.data().get(0);
+            FeedDto d2 = result.data().get(1);
+            assertThat(d1.id()).isEqualTo(f1.getId());
+            assertThat(d2.id()).isEqualTo(f2.getId());
+        }
+
+        private DeletedFeedCursorRequest createDefaultDeletedFeedRequest(int limit) {
+
+            return DeletedFeedCursorRequest.builder()
+                .cursor(null)
+                .idAfter(null)
+                .limit(limit)
+                .build();
         }
     }
 }

@@ -20,8 +20,6 @@ spring:
   batch:
     jdbc:
       initialize-schema: always
-    job:
-      enabled: true
 
   # PostgreSQL DB 접속 정보
   datasource:
@@ -41,9 +39,9 @@ spring:
         default_batch_fetch_size: 100
         format_sql: true
         dialect: org.hibernate.dialect.PostgreSQLDialect
-  elasticsearch:
-    health-timeout-ms: 10000
-    uris: elasticsearch:9200
+#  elasticsearch:
+#    health-timeout-ms: 10000
+#    uris: elasticsearch:9200
 
   data:
     redis:
@@ -60,7 +58,7 @@ spring:
     bootstrap-servers: ${SPRING_KAFKA_BOOTSTRAP_SERVERS:}
     consumer:
       group-id: ${SPRING_KAFKA_CONSUMER_GROUP_ID:otboo-sse-group}
-      auto-offset-reset: latest
+      auto-offset-reset: earliest
       enable-auto-commit: true
       auto-commit-interval-ms: 1000
       key-deserializer: org.apache.kafka.common.serialization.StringDeserializer

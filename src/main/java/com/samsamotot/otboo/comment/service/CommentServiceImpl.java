@@ -78,10 +78,6 @@ public class CommentServiceImpl implements CommentService {
         feedRepository.incrementCommentCount(feedId); // 댓글 수 증가
 
         CommentDto result = commentMapper.toDto(saved);
-
-        // ElasticSearch 피드 동기화 이벤트 발행
-        eventPublisher.publishEvent(new FeedSyncEvent(feedId));
-
         log.debug(SERVICE + "댓글 생성 완료: commentId = {}", saved.getId());
 
         eventPublisher.publishEvent(new CommentCreatedEvent(request.authorId(), feedId, request.content())); // 알림
@@ -104,7 +100,7 @@ public class CommentServiceImpl implements CommentService {
 
         log.debug(SERVICE + "댓글 목록 조회 시작: request = {}, feedId = {}", request, feedId);
 
-        Feed feed = feedRepository.findByIdAndIsDeletedFalse(feedId)
+        Feed feed = feedRepository.findById(feedId)
             .orElseThrow(() -> new OtbooException(ErrorCode.FEED_NOT_FOUND));
 
         String cursor = request.cursor();
